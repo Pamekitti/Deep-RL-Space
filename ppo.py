@@ -85,7 +85,7 @@ def make_env(gym_id, seed, idx, capture_video, run_name):
         env = gym.wrappers.RecordEpisodeStatistics(env)
         if capture_video:
             if idx == 0:
-                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}", episode_trigger=lambda x: x % 1000 == 0)
+                env = gym.wrappers.RecordVideo(env, f"videos/{run_name}")
         env.seed(seed)
         env.action_space.seed(seed)
         env.observation_space.seed(seed)
@@ -142,9 +142,8 @@ if __name__ == "__main__":
             config=vars(args),
             name=run_name,
             monitor_gym=True,
-            save_code=True
+            save_code=True,
         )
-
     writer = SummaryWriter(f"runs/{run_name}")
     writer.add_text(
         "hyperparameters",
@@ -164,11 +163,8 @@ if __name__ == "__main__":
         [make_env(args.gym_id, args.seed + i, i, args.capture_video, run_name) for i in range(args.num_envs)]
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
-    print("envs.single_observation_space", envs.single_observation_space.shape)
-    print("envs.single_action_space", envs.single_action_space.n)
 
     agent = Agent(envs).to(device)
-    print(agent)
     optimizer = optim.Adam(agent.parameters(), lr=args.learning_rate, eps=1e-5)
 
     # ALGO Logic: Storage setup
@@ -184,13 +180,13 @@ if __name__ == "__main__":
     start_time = time.time()
     next_obs = torch.Tensor(envs.reset()).to(device)
     next_done = torch.zeros(args.num_envs).to(device)
-    num_updates = int(args.total_timesteps) // args.batch_size
+    num_updates = args.total_timesteps // args.batch_size
 
     for update in range(1, num_updates + 1):
         # 4. Annealing the rate if instructed to do so.
         if args.anneal_lr:
             frac = 1.0 - (update - 1.0) / num_updates
-            lrnow = args.learning_rate * frac
+            lrnow = frac * args.learning_rate
             optimizer.param_groups[0]["lr"] = lrnow
 
         for step in range(0, args.num_steps):
@@ -212,12 +208,12 @@ if __name__ == "__main__":
 
             for item in info:
                 if "episode" in item.keys():
-                    print(f"global_step={global_step}, episode_reward={item['episode']['r']}")
-                    writer.add_scalar("charts/episode_reward", item["episode"]["r"], global_step)
-                    writer.add_scalar("charts/episode_length", item["episode"]["l"], global_step)
+                    print(f"global_step={global_step}, episodic_return={item['episode']['r']}")
+                    writer.add_scalar("charts/episodic_return", item["episode"]["r"], global_step)
+                    writer.add_scalar("charts/episodic_length", item["episode"]["l"], global_step)
                     break
 
-        # 5. GAE bootstrap reward if not done
+        # bootstrap value if not done
         with torch.no_grad():
             next_value = agent.get_value(next_obs).reshape(1, -1)
             if args.gae:
@@ -257,13 +253,12 @@ if __name__ == "__main__":
         b_inds = np.arange(args.batch_size)
         clipfracs = []
         for epoch in range(args.update_epochs):
+            np.random.shuffle(b_inds)
             for start in range(0, args.batch_size, args.minibatch_size):
                 end = start + args.minibatch_size
                 mb_inds = b_inds[start:end]
 
-                _, newlogprob, entropy, newvalue = agent.get_action_and_value(
-                    b_obs[mb_inds], b_actions[mb_inds]
-                )
+                _, newlogprob, entropy, newvalue = agent.get_action_and_value(b_obs[mb_inds], b_actions.long()[mb_inds])
                 logratio = newlogprob - b_logprobs[mb_inds]
                 ratio = logratio.exp()
 
@@ -287,10 +282,10 @@ if __name__ == "__main__":
                 if args.clip_vloss:
                     v_loss_unclipped = (newvalue - b_returns[mb_inds]) ** 2
                     v_clipped = b_values[mb_inds] + torch.clamp(
-                            newvalue - b_values[mb_inds],
-                            -args.clip_coef,
-                            args.clip_coef
-                        )
+                        newvalue - b_values[mb_inds],
+                        -args.clip_coef,
+                        args.clip_coef,
+                    )
                     v_loss_clipped = (v_clipped - b_returns[mb_inds]) ** 2
                     v_loss_max = torch.max(v_loss_unclipped, v_loss_clipped)
                     v_loss = 0.5 * v_loss_max.mean()
@@ -327,5 +322,3 @@ if __name__ == "__main__":
 
     envs.close()
     writer.close()
-
-
