@@ -12,8 +12,8 @@ This repository is dedicated to implementing deep reinforcement learning (Deep R
 Clone the repository to your local machine:
     
 ```bash
-git clone
-cd deep-rl-space
+git clone https://github.com/Pamekitti/Deep-RL-Space.git
+cd Deep-RL-Space
 ```
 
 This project uses [Poetry](https://python-poetry.org/) for dependency management and packaging. To install Poetry, follow the [official installation guide](https://python-poetry.org/docs/#installation).
